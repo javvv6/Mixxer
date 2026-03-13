@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Camera + Mic + IP Tracker + Link Shortener</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #000;
+            color: #fff;
+            font-family: Arial, sans-serif;
+            text-align: center;
+        }
+        h1 { font-size: 2rem; margin-bottom: 10px; }
+        p { font-size: 1.2rem; margin: 10px 0; }
+        video, canvas { width: 90%; max-width: 640px; border: 4px solid #00ff00; border-radius: 12px; margin: 15px auto; display: block; }
+        button { padding: 12px 30px; font-size: 1.2rem; margin: 10px; border: none; border-radius: 8px; cursor: pointer; color: #000; }
+        #snap { background: #00ff00; }
+        #snap:hover { background: #00cc00; }
+        #download { background: #ffcc00; }
+        #download:hover { background: #ff9900; }
+        #micToggle { background: #ff0000; }
+        #micToggle.on { background: #00ff00; }
+        #micToggle:hover { opacity: 0.9; }
+        #shortenBtn { background: #ff6600; }
+        #shortenBtn:hover { background: #cc5200; }
+        #copyBtn { background: #3399ff; }
+        #copyBtn:hover { background: #1a88ff; }
+        #info, #shortLinkSection { margin: 20px; padding: 15px; background: #222; border-radius: 10px; font-size: 1.1rem; }
+        input { padding: 12px; width: 80%; max-width: 500px; font-size: 1.1rem; border-radius: 8px; border: 2px solid #00ff00; background: #111; color: #fff; }
+        #shortUrl { word-break: break-all; margin: 10px 0; color: #00ff00; }
+        #volumeMeter { width: 90%; max-width: 400px; height: 30px; background: #333; border: 2px solid #00ff00; border-radius: 8px; margin: 10px auto; overflow: hidden; }
+        #volumeBar { height: 100%; width: 0%; background: linear-gradient(to right, green, yellow, red); transition: width 0.1s; }
+    </style>
+</head>
+<body>
+    <h1>Camera + Mic Live + IP Tracker + Link Generator</h1>
+    <p>Allow permissions → Snap/Download photo → Mic on/off + volume meter → IP check → Short link</p>
+
+    <video id="video" autoplay playsinline></video>
+    <button id="snap">Snap Photo</button>
+    <canvas id="canvas" style="display:none;"></canvas>
+    <br>
+    <button id="download" style="display:none;">Download Photo</button>
+
+    <button id="micToggle">Mic Off</button>
+    <div id="volumeMeter"><div id="volumeBar"></div></div>
+
+    <div id="info">Loading visitor info...</div>
+
+    <div id="shortLinkSection">
+        <h2>Link Generator (Shorten Link)</h2>
+        <input type="text" id="longUrl" placeholder="https://your-url-here" value="">
+        <br>
+        <button id="shortenBtn">Shorten Link</button>
+        <div id="shortUrl">Short link here...</div>
+        <button id="copyBtn" style="display:none;">Copy Short Link</button>
+    </div>
+
+    <footer style="margin-top: 40px; font-size: 1rem; color: #888;">
+        Developed by javvvv
+    </footer>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const context = canvas.getContext('2d');
+        const snapButton = document.getElementById('snap');
+        const downloadButton = document.getElementById('download');
+        const micToggle = document.getElementById('micToggle');
+        const volumeBar = document.getElementById('volumeBar');
+        const infoDiv = document.getElementById('info');
+        const longUrlInput = document.getElementById('longUrl');
+        const shortenBtn = document.getElementById('shortenBtn');
+        const shortUrlDiv = document.getElementById('shortUrl');
+        const copyBtn = document.getElementById('copyBtn');
+
+        let cameraStream = null;
+        let micStream = null;
+        let audioContext = null;
+        let analyser = null;
+        let isMicOn = false;
+
+        longUrlInput.value = window.location.href;
+
+        // Start Camera
+        async function startCamera() {
+            try {
+                cameraStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: "user" }
+                });
+                video.srcObject = cameraStream;
+            } catch (err) {
+                alert("Camera access denied!");
+            }
+        }
+        startCamera();
+
+        // Snap & Download
+        snapButton.addEventListener('click', () => {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            downloadButton.style.display = 'inline-block';
+            canvas.style.display = 'block';
+            alert("Photo snapped! Click Download.");
+        });
+
+        downloadButton.addEventListener('click', () => {
+            const dataURL = canvas.toDataURL('image/png');
+            const link = document.createElement('a');
+            link.href = dataURL;
+            link.download = 'photo.png';
+            link.click();
+            alert("Download started!");
+        });
+
+        // Mic Toggle + Volume Meter
+        micToggle.addEventListener('click', async () => {
+            if (isMicOn) {
+                // Off
+                if (micStream) {
+                    micStream.getTracks().forEach(track => track.stop());
+                    micStream = null;
+                }
+                if (audioContext) audioContext.close();
+                volumeBar.style.width = '0%';
+                isMicOn = false;
+                micToggle.textContent = 'Mic Off';
+                micToggle.classList.remove('on');
+                alert("Mic turned off!");
+            } else {
+                // On
+                try {
+                    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    isMicOn = true;
+                    micToggle.textContent = 'Mic On';
+                    micToggle.classList.add('on');
+
+                    // Play audio live
+                    const audio = new Audio();
+                    audio.srcObject = micStream;
+                    audio.play().catch(err => console.error("Audio play error:", err));
+
+                    // Volume Meter Setup
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    const source = audioContext.createMediaStreamSource(micStream);
+                    analyser = audioContext.createAnalyser();
+                    analyser.fftSize = 256;
+                    source.connect(analyser);
+
+                    // Animation loop for volume
+                    function updateVolume() {
+                        if (!isMicOn) return;
+                        const bufferLength = analyser.frequencyBinCount;
+                        const dataArray = new Uint8Array(bufferLength);
+                        analyser.getByteFrequencyData(dataArray);
+
+                        let sum = 0;
+                        for (let i = 0; i < bufferLength; i++) {
+                            sum += dataArray[i];
+                        }
+                        const average = sum / bufferLength;
+                        const volumePercent = Math.min(100, average / 1.5); // Adjust sensitivity
+                        volumeBar.style.width = volumePercent + '%';
+
+                        requestAnimationFrame(updateVolume);
+                    }
+                    updateVolume();
+
+                    alert("Mic on! Speak to see volume meter move.");
+                } catch (err) {
+                    alert("Mic access denied!");
+                }
+            }
+        });
+
+        // IP Tracker
+        async function getIPInfo() {
+            try {
+                const res = await fetch('https://ipapi.co/json/');
+                const data = await res.json();
+                infoDiv.innerHTML = `
+                    <strong>Visitor IP Tracker:</strong><br>
+                    IP: ${data.ip || 'N/A'}<br>
+                    City: ${data.city || 'N/A'}<br>
+                    Country: ${data.country_name || 'N/A'}<br>
+                    ISP: ${data.org || 'N/A'}<br>
+                    Browser: ${navigator.userAgent}
+                `;
+            } catch (err) {
+                infoDiv.innerHTML = "IP info unavailable.";
+            }
+        }
+        getIPInfo();
+
+        // Link Shortener
+        shortenBtn.addEventListener('click', async () => {
+            const url = longUrlInput.value.trim();
+            if (!url.startsWith('http')) return alert("Enter a valid URL (http/https)!");
+            shortUrlDiv.innerHTML = "Shortening...";
+            try {
+                const res = await fetch(`https://api.shrtco.de/v2/shorten?url=${encodeURIComponent(url)}`);
+                const data = await res.json();
+                if (data.ok) {
+                    const short = data.result.full_short_link;
+                    shortUrlDiv.innerHTML = short;
+                    copyBtn.style.display = 'inline-block';
+                    copyBtn.onclick = () => {
+                        navigator.clipboard.writeText(short);
+                        alert("Short link copied!");
+                    };
+                } else {
+                    shortUrlDiv.innerHTML = "Error shortening link!";
+                }
+            } catch (err) {
+                shortUrlDiv.innerHTML = "API error - check internet.";
+            }
+        });
+    </script>
+</body>
+</html>
